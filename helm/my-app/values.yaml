@@ -1,0 +1,24 @@
+replicaCount: 1
+
+image:
+  repository: abhi10011990/my-app
+  tag: latest
+  digest: ""
+  pullPolicy: IfNotPresent
+
+containerPort: 8080
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+appEnv: staging
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi

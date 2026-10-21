@@ -1,0 +1,298 @@
+name: Production CI-CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: my-app-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: docker.io/abhi10011990/my-app
+  HELM_CHART: ./helm/my-app
+  APP_RELEASE: my-app
+  DEPLOYMENT_NAME: my-app
+  SERVICE_NAME: my-app
+
+jobs:
+  validate:
+    name: Validate source and Helm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3
+
+      - name: Test application
+        run: |
+          python -m pip install -r requirements.txt
+          python - <<'PY'
+          from app import app
+
+          client = app.test_client()
+          assert client.get("/healthz").status_code == 200
+          assert client.get("/readyz").status_code == 200
+          assert client.get("/").status_code == 200
+          print("Application tests passed")
+          PY
+
+      - name: Build Helm dependencies
+        run: helm dependency build "$HELM_CHART"
+
+      - name: Lint Helm chart
+        run: helm lint "$HELM_CHART"
+
+      - name: Render staging manifests
+        run: |
+          helm template "$APP_RELEASE" "$HELM_CHART" \
+            --namespace staging \
+            --values "$HELM_CHART/values.yaml" \
+            --values "$HELM_CHART/values-staging.yaml" \
+            > /tmp/rendered.yaml
+          test -s /tmp/rendered.yaml
+
+      - name: Scan repository
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+  build:
+    name: Build and publish Docker image
+    needs: validate
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    outputs:
+      image_digest: ${{ steps.image.outputs.digest }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and publish
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: true
+          sbom: true
+
+      - name: Scan published image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+  deploy-staging:
+    name: Deploy and verify staging
+    needs: build
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, k8s-deploy]
+    environment: staging
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify cluster context
+        env:
+          KUBE_CONTEXT: ${{ vars.KUBE_CONTEXT }}
+        run: |
+          set -euo pipefail
+          test -n "$KUBE_CONTEXT"
+          kubectl config use-context "$KUBE_CONTEXT"
+          kubectl get nodes
+          kubectl get namespace staging
+
+      - name: Deploy exact image digest
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_DIGEST"
+
+          helm upgrade --install "$APP_RELEASE" "$HELM_CHART" \
+            --namespace staging \
+            --values "$HELM_CHART/values.yaml" \
+            --values "$HELM_CHART/values-staging.yaml" \
+            --set-string image.repository="$IMAGE_NAME" \
+            --set-string image.digest="$IMAGE_DIGEST" \
+            --set-string image.tag="${GITHUB_SHA}" \
+            --atomic --wait --timeout 10m
+
+      - name: Verify staging rollout
+        run: |
+          kubectl rollout status \
+            "deployment/$DEPLOYMENT_NAME" \
+            --namespace staging \
+            --timeout=5m
+
+          kubectl get pods,svc --namespace staging
+
+      - name: Smoke test staging
+        run: |
+          set -euo pipefail
+
+          kubectl port-forward \
+            --namespace staging \
+            "svc/$SERVICE_NAME" \
+            18080:80 \
+            > /tmp/my-app-port-forward.log 2>&1 &
+
+          PF_PID=$!
+          trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
+
+          ready=false
+          for i in $(seq 1 30); do
+            if curl --fail --silent \
+              http://127.0.0.1:18080/healthz >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$ready" != true ]; then
+            cat /tmp/my-app-port-forward.log
+            echo "Staging health check failed."
+            exit 1
+          fi
+
+          echo "Staging health check passed."
+
+  deploy-production:
+    name: Approved production deployment
+    needs: [build, deploy-staging]
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, k8s-deploy]
+    environment: production
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify production cluster context
+        env:
+          KUBE_CONTEXT: ${{ vars.KUBE_CONTEXT }}
+        run: |
+          set -euo pipefail
+          test -n "$KUBE_CONTEXT"
+          kubectl config use-context "$KUBE_CONTEXT"
+          kubectl get nodes
+          kubectl get namespace production
+
+      - name: Deploy the same image digest
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_DIGEST"
+
+          helm upgrade --install "$APP_RELEASE" "$HELM_CHART" \
+            --namespace production \
+            --values "$HELM_CHART/values.yaml" \
+            --values "$HELM_CHART/values-production.yaml" \
+            --set-string image.repository="$IMAGE_NAME" \
+            --set-string image.digest="$IMAGE_DIGEST" \
+            --set-string image.tag="${GITHUB_SHA}" \
+            --atomic --wait --timeout 10m
+
+      - name: Verify production rollout
+        run: |
+          kubectl rollout status \
+            "deployment/$DEPLOYMENT_NAME" \
+            --namespace production \
+            --timeout=5m
+
+          kubectl get deployment,pods,svc \
+            --namespace production
+
+      - name: Verify production health
+        run: |
+          set -euo pipefail
+
+          kubectl port-forward \
+            --namespace production \
+            "svc/$SERVICE_NAME" \
+            18080:80 \
+            > /tmp/my-app-port-forward.log 2>&1 &
+
+          PF_PID=$!
+          trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
+
+          ready=false
+          for i in $(seq 1 30); do
+            if curl --fail --silent \
+              http://127.0.0.1:18080/healthz >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$ready" != true ]; then
+            cat /tmp/my-app-port-forward.log
+            echo "Production health check failed."
+            exit 1
+          fi
+
+          echo "Production health check passed."
