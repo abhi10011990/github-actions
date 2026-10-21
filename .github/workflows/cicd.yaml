@@ -1,0 +1,50 @@
+name: ARC Ephemeral Runner E2E Test
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-test:
+    # Replace with your ARC runner scale set name
+    runs-on: arc-runner-set
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify runner
+        run: |
+          echo "=================================="
+          echo "ARC runner is working!"
+          echo "Runner name: $RUNNER_NAME"
+          echo "Runner OS: $RUNNER_OS"
+          echo "Runner architecture: $RUNNER_ARCH"
+          echo "Hostname:"
+          hostname
+          echo "=================================="
+
+      - name: Test CI
+        run: |
+          echo "Running CI test..."
+          mkdir -p build
+          echo "ARC E2E test successful" > build/result.txt
+          cat build/result.txt
+
+      - name: Test deployment
+        run: |
+          echo "Simulating deployment..."
+          mkdir -p deploy
+          cp build/result.txt deploy/
+          echo "Deployment simulation successful"
+          cat deploy/result.txt
+
+      - name: Verify completion
+        if: success()
+        run: |
+          echo "CI and deployment simulation completed successfully!"

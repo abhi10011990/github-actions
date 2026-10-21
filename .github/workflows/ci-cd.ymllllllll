@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE_NAME: docker.io/abhi10011990/devsecops-java-demo
+  IMAGE_NAME: docker.io/abhi10011990/my-app
   HELM_CHART: ./helm/my-app
   APP_RELEASE: my-app
   DEPLOYMENT_NAME: my-app
