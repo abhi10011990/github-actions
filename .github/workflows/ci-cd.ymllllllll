@@ -136,7 +136,7 @@ jobs:
     if: >-
       github.event_name != 'pull_request' &&
       github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, k8s-deploy]
+    runs-on: k8s-training-node-runner
     environment: staging
     timeout-minutes: 20
 
@@ -219,7 +219,7 @@ jobs:
     if: >-
       github.event_name != 'pull_request' &&
       github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, k8s-deploy]
+    runs-on: k8s-training-node-runner
     environment: production
     timeout-minutes: 20
 
