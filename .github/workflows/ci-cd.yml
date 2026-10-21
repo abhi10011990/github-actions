@@ -70,7 +70,7 @@ jobs:
           test -s /tmp/rendered.yaml
 
       - name: Scan repository
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@0.76.0
         with:
           scan-type: fs
           scan-ref: .
