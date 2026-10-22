@@ -25,7 +25,7 @@ jobs:
   validate:
     name: Validate source and Helm
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
 
     steps:
       - name: Checkout
@@ -87,7 +87,7 @@ jobs:
       github.event_name != 'pull_request' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
 
     permissions:
       contents: read
@@ -138,7 +138,7 @@ jobs:
       github.ref == 'refs/heads/main'
     runs-on: k8s-training-node-runner
     environment: staging
-    timeout-minutes: 20
+    timeout-minutes: 5
 
     permissions:
       contents: read
@@ -234,7 +234,7 @@ jobs:
       github.ref == 'refs/heads/main'
     runs-on: k8s-training-node-runner
     environment: production
-    timeout-minutes: 20
+    timeout-minutes: 5
 
     permissions:
       contents: read
@@ -244,14 +244,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Verify production cluster context
-        env:
-          KUBE_CONTEXT: ${{ vars.KUBE_CONTEXT }}
         run: |
           set -euo pipefail
-          test -n "$KUBE_CONTEXT"
-          kubectl config use-context "$KUBE_CONTEXT"
-          kubectl get nodes
-          kubectl get namespace production
+          kubectl get deployments -n production
+          kubectl auth can-i patch deployments -n production
+          kubectl auth can-i create pods/portforward -n production
+          helm list -n production
+
 
       - name: Deploy the same image digest
         env:
