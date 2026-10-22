@@ -150,12 +150,12 @@ jobs:
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
         with:
-        version: 'v1.34.1'
+          version: 'v1.34.1'
 
       - name: Install Helm
         uses: azure/setup-helm@v4
         with:
-        version: 'v3.17.3'
+          version: 'v3.17.3'
 
       - name: Verify cluster context
         env:
