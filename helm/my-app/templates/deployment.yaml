@@ -1,3 +1,4 @@
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,6 +35,11 @@ spec:
               value: {{ .Values.appEnv | quote }}
             - name: APP_VERSION
               value: {{ .Values.image.tag | quote }}
+            - name: TMPDIR
+              value: /tmp
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /readyz
@@ -57,4 +63,6 @@ spec:
             capabilities:
               drop:
                 - ALL
-          
+      volumes:
+        - name: tmp
+          emptyDir: {}

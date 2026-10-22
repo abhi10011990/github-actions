@@ -22,3 +22,7 @@ resources:
   limits:
     cpu: 250m
     memory: 128Mi
+    
+tmpVolume:
+  enabled: true
+  mountPath: /tmp
