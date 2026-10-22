@@ -147,6 +147,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+        version: 'v1.34.1'
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+        version: 'v3.17.3'
+
       - name: Verify cluster context
         env:
           KUBE_CONTEXT: ${{ vars.KUBE_CONTEXT }}
