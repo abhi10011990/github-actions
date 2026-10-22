@@ -157,15 +157,19 @@ jobs:
         with:
           version: 'v3.17.3'
 
-      - name: Verify cluster context
-        env:
-          KUBE_CONTEXT: ${{ vars.KUBE_CONTEXT }}
+      - name: Verify cluster access
         run: |
           set -euo pipefail
-          test -n "$KUBE_CONTEXT"
-          kubectl config use-context "$KUBE_CONTEXT"
-          kubectl get nodes
+
+          echo "Checking Kubernetes authentication..."
           kubectl get namespace staging
+
+          echo "Checking deployment permissions..."
+          kubectl auth can-i patch deployments -n staging
+          kubectl auth can-i create deployments -n staging
+
+          echo "Checking Helm access..."
+          helm list -n staging
 
       - name: Deploy exact image digest
         env:
