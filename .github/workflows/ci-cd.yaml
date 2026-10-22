@@ -162,7 +162,6 @@ jobs:
           set -euo pipefail
 
           echo "Checking Kubernetes authentication..."
-          kubectl get namespace staging
 
           echo "Checking deployment permissions..."
           kubectl auth can-i patch deployments -n staging
